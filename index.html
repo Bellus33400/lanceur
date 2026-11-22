@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="fr"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#14110f"><link rel="manifest" href="manifest.webmanifest"><link rel="icon" href="icon-192.png">
+<title>Lanceur</title>
+<style>
+:root{--f:#14110f;--f2:#1f1a16;--p:#e8dcc0;--p2:#c9bb98;--or:#c9a227;--ov:#e8c14a;--b:#4a3f33;--r:#c9442f}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;background:var(--f);color:var(--p);font-family:Georgia,serif}
+body{padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom);display:flex;flex-direction:column}
+header{display:flex;align-items:center;justify-content:space-between;padding:10px 14px}
+h1{margin:0;font-size:20px;letter-spacing:3px;color:var(--ov)}
+button,.b,select,input:not([type=checkbox]){font:inherit}
+button,.b{background:var(--f2);color:var(--p);border:2px solid var(--b);border-radius:8px;padding:9px 12px;font-size:13px}
+button:active,.b:active{border-color:var(--or);color:var(--ov)}
+.red{border-color:var(--r);color:var(--r)}
+#adm{display:flex;gap:8px;flex-wrap:wrap;padding:8px 14px;margin:0 10px;border:2px solid var(--r);border-radius:10px;background:var(--f2)}
+#tabs{display:flex;gap:6px;overflow-x:auto;padding:10px 14px 0}
+.tab{white-space:nowrap;border-radius:8px 8px 0 0;border-bottom:0;padding:10px 16px}
+.tab.on{background:var(--or);color:var(--f);border-color:var(--or);font-weight:bold}
+#grid{flex:1;overflow-y:auto;display:grid;grid-template-columns:repeat(auto-fill,minmax(92px,1fr));gap:14px 6px;align-content:start;padding:18px 12px;border-top:2px solid var(--or)}
+.cell{display:flex;flex-direction:column;align-items:center;gap:6px;text-align:center;font-size:12px;color:var(--p2)}
+.ic{width:64px;height:64px;border-radius:16px;background:var(--f2);border:2px solid var(--b);display:flex;align-items:center;justify-content:center;font-size:32px;overflow:hidden}
+.ic img{width:100%;height:100%;object-fit:cover}
+.cell:active .ic{border-color:var(--or)}
+.em{grid-column:1/-1;text-align:center;color:var(--p2)}
+#run{position:fixed;inset:0;background:#000;z-index:9}
+#run[hidden]{display:none}
+#fr{width:100%;height:100%;border:0;background:#fff}
+#x{position:absolute;top:calc(env(safe-area-inset-top) + 6px);right:6px;width:36px;height:36px;padding:0;border-radius:50%;opacity:.55;z-index:10}
+dialog{background:var(--f2);color:var(--p);border:2px solid var(--or);border-radius:12px;width:min(92vw,420px);padding:16px}
+dialog::backdrop{background:#000a}
+dialog label{display:block;margin:10px 0;font-size:13px;color:var(--p2)}
+dialog input:not([type=checkbox]),dialog select{display:block;width:100%;margin-top:4px;padding:9px;background:var(--f);color:var(--p);border:2px solid var(--b);border-radius:8px}
+.row{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+</style></head><body>
+<header><h1>LANCEUR</h1><button id="bad">ADMIN</button></header>
+<div id="adm" hidden>
+<label class="b">+ Programmes<input id="add" type="file" accept=".html,.htm,text/html" multiple hidden></label>
+<button id="bak">Sauvegarder</button>
+<label class="b">Restaurer<input id="rst" type="file" accept=".json,application/json" hidden></label>
+</div>
+<div id="tabs"></div><div id="grid"></div>
+<div id="run" hidden><button id="x">✕</button>
+<iframe id="fr" allow="microphone;camera;fullscreen;clipboard-write" sandbox="allow-scripts allow-same-origin allow-modals allow-downloads allow-forms allow-popups allow-pointer-lock"></iframe></div>
+<dialog id="dlg"><h3 style="margin:0;color:var(--ov)">Modifier</h3>
+<label>Nom<input id="dn"></label>
+<label>Icône (emoji)<input id="di" maxlength="4"></label>
+<label>Onglet<select id="dtab"></select></label>
+<label>Image d'icône<input id="dimg" type="file" accept="image/*"></label>
+<label><input id="drm" type="checkbox"> Retirer l'image</label>
+<label>Remplacer par une nouvelle version du programme<input id="dfile" type="file" accept=".html,.htm"></label>
+<div class="row"><button id="dok">Enregistrer</button><button id="ddel" class="red">Supprimer</button><button id="dca">Annuler</button></div></dialog>
+<script>
+const $=s=>document.querySelector(s);
+let db,cfg,cur,admin=false;
+const idb=()=>new Promise((ok,ko)=>{const r=indexedDB.open('lanceur',1);r.onupgradeneeded=()=>r.result.createObjectStore('kv');r.onsuccess=()=>ok(r.result);r.onerror=ko});
+const tx=(m,f)=>new Promise((ok,ko)=>{const t=db.transaction('kv',m),q=f(t.objectStore('kv'));t.oncomplete=()=>ok(q.result);t.onerror=ko});
+const get=k=>tx('readonly',s=>s.get(k)),put=(k,v)=>tx('readwrite',s=>s.put(v,k)),del=k=>tx('readwrite',s=>s.delete(k));
+const save=()=>put('cfg',cfg),uid=()=>Math.random().toString(36).slice(2,8);
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const nice=n=>{n=n.replace(/\.[^.]+$/,'').replace(/[_-]+/g,' ').trim();return n.charAt(0).toUpperCase()+n.slice(1)};
+const small=f=>new Promise(ok=>{const i=new Image();i.onload=()=>{const c=document.createElement('canvas');c.width=c.height=128;const s=Math.min(i.width,i.height);c.getContext('2d').drawImage(i,(i.width-s)/2,(i.height-s)/2,s,s,0,0,128,128);ok(c.toDataURL('image/png'))};i.src=URL.createObjectURL(f)});
+/* Chaque programme a son propre espace localStorage (préfixe = id du programme) */
+const shim=id=>`<script>(()=>{const P='${id}:',S=Storage.prototype,g=S.getItem,s=S.setItem,r=S.removeItem,c=S.clear;S.getItem=function(k){return this===localStorage?g.call(this,P+k):g.call(this,k)};S.setItem=function(k,v){return this===localStorage?s.call(this,P+k,v):s.call(this,k,v)};S.removeItem=function(k){return this===localStorage?r.call(this,P+k):r.call(this,k)};S.clear=function(){if(this!==localStorage)return c.call(this);Object.keys(localStorage).filter(k=>k.startsWith(P)).forEach(k=>r.call(this,k))}})()<\/script>`;
+
+function render(){
+ if(!cfg.tabs.find(t=>t.id==cur))cur=cfg.tabs[0].id;
+ $('#tabs').innerHTML=cfg.tabs.map(t=>`<button class="tab${t.id==cur?' on':''}" data-t="${t.id}">${esc(t.name)}</button>`).join('')+(admin?'<button class="tab" data-t="+">＋</button>':'');
+ $('#adm').hidden=!admin;$('#bad').textContent=admin?"QUITTER L'ADMIN":'ADMIN';
+ const ps=cfg.progs.filter(p=>p.tab==cur);
+ $('#grid').innerHTML=ps.map(p=>`<div class="cell" data-p="${p.id}"><div class="ic">${p.img?`<img src="${p.img}">`:esc(p.icon)}</div><span>${esc(p.name)}</span></div>`).join('')||'<p class="em">Aucun programme ici.'+(admin?'':' Passe en mode admin pour en ajouter.')+'</p>';
+}
+$('#bad').onclick=()=>{admin=!admin;render()};
+$('#tabs').onclick=async e=>{const t=e.target.dataset.t;if(!t)return;
+ if(t=='+'){const n=prompt("Nom du nouvel onglet :");if(n&&n.trim()){const id=uid();cfg.tabs.push({id,name:n.trim()});cur=id;await save()}}
+ else if(admin&&t==cur){const o=cfg.tabs.find(x=>x.id==t),n=prompt("Nouveau nom (vide = supprimer l'onglet) :",o.name);if(n===null)return;
+  if(n.trim())o.name=n.trim();
+  else if(cfg.tabs.length>1&&confirm("Supprimer cet onglet ? Ses programmes passent dans le premier onglet restant.")){cfg.tabs=cfg.tabs.filter(x=>x.id!=t);cfg.progs.forEach(p=>{if(p.tab==t)p.tab=cfg.tabs[0].id});cur=cfg.tabs[0].id}
+  await save()}
+ else cur=t;
+ render()};
+$('#grid').onclick=e=>{const c=e.target.closest('.cell');if(!c)return;const p=cfg.progs.find(x=>x.id==c.dataset.p);admin?edit(p):launch(p)};
+$('#add').onchange=async e=>{for(const f of e.target.files){const id=uid();await put('h:'+id,await f.text());cfg.progs.push({id,name:nice(f.name),icon:'🌐',img:'',tab:cur})}e.target.value='';await save();render()};
+
+function edit(p){
+ $('#dn').value=p.name;$('#di').value=p.icon;
+ $('#dtab').innerHTML=cfg.tabs.map(t=>`<option value="${t.id}"${t.id==p.tab?' selected':''}>${esc(t.name)}</option>`).join('');
+ $('#dimg').value=$('#dfile').value='';$('#drm').checked=false;$('#dlg').showModal();
+ $('#dok').onclick=async()=>{p.name=$('#dn').value.trim()||p.name;p.icon=$('#di').value.trim()||'🌐';p.tab=$('#dtab').value;
+  if($('#drm').checked)p.img='';const f=$('#dimg').files[0];if(f)p.img=await small(f);
+  const h=$('#dfile').files[0];if(h)await put('h:'+p.id,await h.text());
+  await save();$('#dlg').close();render()};
+ $('#ddel').onclick=async()=>{if(!confirm('Supprimer « '+p.name+' » et ses données ?'))return;
+  cfg.progs=cfg.progs.filter(x=>x!==p);await del('h:'+p.id);
+  Object.keys(localStorage).filter(k=>k.startsWith(p.id+':')).forEach(k=>localStorage.removeItem(k));
+  await save();$('#dlg').close();render()};
+ $('#dca').onclick=()=>$('#dlg').close()}
+
+async function launch(p){
+ const html=await get('h:'+p.id);if(html==null)return alert('Fichier introuvable.');
+ let h=html.replace(/<head(\s[^>]*)?>/i,m=>m+shim(p.id));
+ if(h===html)h=html.replace(/^(\s*<!doctype[^>]*>)?/i,m=>m+shim(p.id));
+ $('#fr').srcdoc=h;$('#run').hidden=false;history.pushState({run:1},'')}
+const stop=()=>{$('#run').hidden=true;$('#fr').srcdoc=''};
+addEventListener('popstate',stop);$('#x').onclick=()=>history.back();
+
+$('#bak').onclick=async()=>{const html={},ls={};
+ for(const p of cfg.progs)html[p.id]=await get('h:'+p.id);
+ for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);ls[k]=localStorage.getItem(k)}
+ const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify({v:1,cfg,html,ls})],{type:'application/json'}));
+ a.download='lanceur-sauvegarde-'+new Date().toISOString().slice(0,10)+'.json';a.click()};
+$('#rst').onchange=async e=>{const f=e.target.files[0];e.target.value='';
+ if(!f||!confirm('Remplacer TOUT le contenu actuel par cette sauvegarde ?'))return;
+ try{const d=JSON.parse(await f.text());if(!d.cfg)throw 0;
+  for(const p of cfg.progs)await del('h:'+p.id);localStorage.clear();cfg=d.cfg;
+  for(const id in d.html)await put('h:'+id,d.html[id]);
+  for(const k in d.ls)localStorage.setItem(k,d.ls[k]);
+  await save();cur=cfg.tabs[0].id;render();alert('Sauvegarde restaurée.')}
+ catch{alert('Fichier de sauvegarde invalide.')}};
+
+(async()=>{db=await idb();cfg=await get('cfg');
+ if(!cfg){cfg={tabs:[{id:'t1',name:'Mes programmes'}],progs:[]};await save()}
+ cur=cfg.tabs[0].id;navigator.storage?.persist?.();render();
+ if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js')})();
+</script></body></html>
